@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>300</height>
+    <width>598</width>
+    <height>307</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -16,10 +16,10 @@
   <widget class="QDialogButtonBox" name="button_box">
    <property name="geometry">
     <rect>
-     <x>120</x>
-     <y>250</y>
-     <width>151</width>
-     <height>21</height>
+     <x>210</x>
+     <y>90</y>
+     <width>161</width>
+     <height>31</height>
     </rect>
    </property>
    <property name="orientation">
@@ -32,30 +32,84 @@
   <widget class="QLabel" name="label">
    <property name="geometry">
     <rect>
-     <x>170</x>
-     <y>60</y>
-     <width>91</width>
+     <x>120</x>
+     <y>40</y>
+     <width>281</width>
      <height>21</height>
     </rect>
    </property>
    <property name="text">
-    <string>IFC Import</string>
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Bitte geben Sie hier den Pfad zur IFC-Datei an:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
    </property>
   </widget>
-  <widget class="QCommandLinkButton" name="commandLinkButton">
+  <widget class="QgsFileWidget" name="localsave">
    <property name="geometry">
     <rect>
-     <x>80</x>
-     <y>130</y>
-     <width>185</width>
-     <height>41</height>
+     <x>120</x>
+     <y>60</y>
+     <width>381</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="storageMode">
+    <enum>QgsFileWidget::GetFile</enum>
+   </property>
+   <property name="relativeStorage">
+    <enum>QgsFileWidget::Absolute</enum>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_2">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>581</width>
+     <height>31</height>
     </rect>
    </property>
    <property name="text">
-    <string>CommandLinkButton</string>
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Dieses Plugin importiert wesentliche Gebäudeattribute aus einer IFC Datei für den City Energy Analyst&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_3">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>120</y>
+     <width>571</width>
+     <height>171</height>
+    </rect>
+   </property>
+   <property name="frameShape">
+    <enum>QFrame::Box</enum>
+   </property>
+   <property name="lineWidth">
+    <number>1</number>
+   </property>
+   <property name="text">
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Info:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Der City Energy Analyst (CEA) ist eine Software für thermisch-energetische Gebäudesimulationen. &lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Die Basis der Simulation ist eine Shape-Datei mit bestimmten Attributen des Gebäudes.&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Der IFC Importer erzeugt aus einer IFC-Datei eine für den CEA lesbare Shape-Datei mit&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;allen wichtigen Gebäudeattributen. Wichtig hierbei ist, dass die IFC-Datei den&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Modellkonventionen entspricht und im IFC4 Standard vorliegt.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+   </property>
+   <property name="textFormat">
+    <enum>Qt::AutoText</enum>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignCenter</set>
+   </property>
+   <property name="margin">
+    <number>0</number>
    </property>
   </widget>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsFileWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsfilewidget.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections>
   <connection>
