@@ -32,11 +32,13 @@ from qgis.PyQt.QtWidgets import QAction
 import osgeo.ogr as ogr
 import osgeo.osr as osr
 import sys, os
+#sys.path.append(r'C:\Users\Marco\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\ifc_importer')
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 import ifcopenshell
 from ifcopenshell import geom
 from ifcopenshell.util import element
 import dbf
+import numpy as np
 
 # --------------------
 
@@ -193,7 +195,54 @@ class ImportIFC:
                 self.tr(u'&IFC Importer'),
                 action)
             self.iface.removeToolBarIcon(action)
-    
+            
+    def getTransformMatrix(self, project):
+        def getModelContext(project):
+            flag = False
+            for context in project.RepresentationContexts:
+                if context.ContextType == "Model":
+                    flag = True
+                    return context
+            if flag == False:
+                print ("No context for model was found in this project")
+
+        contextForModel = getModelContext(project)
+        a,b = contextForModel.TrueNorth.DirectionRatios
+        transformMatrix = [[b, -a, 0], [a, b, 0], [0, 0, 1]]
+        transformMatrix = np.mat(transformMatrix).I
+        return transformMatrix
+        
+    def getOriginShift(self, site):
+        def mergeDegrees(Degrees):
+            if len(Degrees) == 4:
+                degree = Degrees[0]+Degrees[1]/60.0+(Degrees[2]+Degrees[3]/1000000.0)/3600.0
+            elif len(Degrees) == 3:
+                degree = Degrees[0]+Degrees[1]/60.0+Degrees[2]/3600.0
+            else:
+                print("Wrong input of degrees")
+            return degree
+        Lat,Lon = site.RefLatitude, site.RefLongitude
+        a, b = mergeDegrees(Lat), mergeDegrees(Lon)
+
+        source = osr.SpatialReference()
+        source.ImportFromEPSG(4326)
+        target = osr.SpatialReference()
+        target.ImportFromEPSG(32632)
+        transform = osr.CoordinateTransformation(source, target)
+        #geom.Transform(transform)
+        #crs = pyproj.CRS.from_epsg(32632)
+        #proj = pyproj.Transformer.from_crs(4326,crs)
+        #a, b = proj.transform(a,b)
+        x, y, z = transform.TransformPoint(a, b)
+        c = site.RefElevation
+        return [x, y, c]
+
+    def georeferencingPoint(self, transMatrix, originShift, inX, inY):
+        a = [inX, inY, 0]
+        result = np.mat(a)*np.mat(transMatrix)+np.mat(originShift)
+        #print(result)
+        return result
+        
     def run(self):
         """Run method that performs all the real work"""
 
@@ -209,25 +258,35 @@ class ImportIFC:
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            
+            print("Path at terminal when executing this file")
+            print(os.getcwd() + "\n")
+
+            print("This file path, relative to os.getcwd()")
+            print(__file__ + "\n")
+
+            print("This file full path (following symlinks)")
+            full_path = os.path.realpath(__file__)
+            print(full_path + "\n")
+
+            print("This file directory and name")
+            path, filename = os.path.split(full_path)
+            print(path + ' --> ' + filename + "\n")
+
+            print("This file directory only")
+            print(os.path.dirname(full_path))
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
             folder_path = self.dlg.localsave.filePath()
             ifc_file = ifcopenshell.open(folder_path)
             print(ifc_file.schema)
             
-            settings = geom.settings()
             
-            IfcSite = ifc_file.by_type("IfcSite")[0]
-            ele = element.get_property_definition(IfcSite)
-            IfcLocalPlacement = IfcSite.ObjectPlacement
-            IfcAxis2Placement3D = IfcLocalPlacement.RelativePlacement
-            IfcCartesianPoint = IfcAxis2Placement3D.Location
-            Coordinates = IfcCartesianPoint.Coordinates
+            
+            
 
-            globalX = Coordinates[0]
-            globalY = Coordinates[1]
-            print(globalX, globalY)
+            USE_WORLD_COORDS = 1 << 1
+            settings = geom.settings()
+            settings.set(settings.USE_WORLD_COORDS, True)
             #####################################
             # Um das Bezugssystem aus der IFC-Datei zu bekommen
             #IfcProjectedCRS = ifc_file.by_type("IfcProjectedCRS")[0]
@@ -239,16 +298,26 @@ class ImportIFC:
             
             #########################
             IfcSlab = ifc_file.by_type("IfcSlab")[0]
+            IfcSite = ifc_file.by_type("IfcSite")[0]
+            IfcProject = ifc_file.by_type("IfcProject")[0]
             
             shape = geom.create_shape(settings, IfcSlab)
             ios_vertices = shape.geometry.verts
-            grouped_verts = [(ios_vertices[i] + globalX, ios_vertices[i + 1] + globalY, ios_vertices[i + 2]) for i in range(0, len(ios_vertices), 3)]
-
+            
+            trans = self.getTransformMatrix(IfcProject)
+            originShift = self.getOriginShift(IfcSite) 
+            
+            grouped_verts = []
+            for i in range(0, len(ios_vertices), 3):
+              if ios_vertices[i + 2] == ios_vertices[2]:
+                result = self.georeferencingPoint(trans, originShift, ios_vertices[i], ios_vertices[i + 1])
+                array = np.array(result)
+                grouped_verts.append((array[0][0], array[0][1]))
             ################################
 
             # Extrahierung des Typ der Konstruktion
 
-            IfcProject = ifc_file.by_type("IfcProject")[0]
+            
 
             Type_of_construction = ifcopenshell.util.element.get_psets(IfcProject)["Pset_ProjectCommon"]["ConstructionMode"]
             #Type_of_construction = Massivhaus
@@ -356,18 +425,6 @@ class ImportIFC:
             except:
                 print("Die Aktion kann nicht abgeschlossen werden, da die Datei noch geöffnet ist.")
  
-            resultantList = []
-            
-            for e in grouped_verts:
-              resultantList.append(e[0:2])
-              
-            # Duplikate löschen
-            coords_list = []
-            
-             
-            for e in resultantList:
-              if e not in coords_list:
-                coords_list.append(e)
             
             ################################
             
@@ -375,7 +432,7 @@ class ImportIFC:
                 # Grundstück als Polygon in ein Shape-File speichern
                 wkt = "POLYGON(("
 
-                for coord in coords_list:
+                for coord in grouped_verts:
                  
                   # Als Polygon im Format:
                   # POLYGON ((30 10, 40 40, 20 40, 10 20, 30 10))
@@ -383,7 +440,7 @@ class ImportIFC:
                   # create the WKT for the feature using Python string formatting
                   wkt += str(float(coord[0])) + " "
                   wkt += str(float(coord[1]))
-                  if coord == coords_list[-1]:
+                  if coord == grouped_verts[-1]:
                     wkt += "))"
                   else:
                     wkt += ","
