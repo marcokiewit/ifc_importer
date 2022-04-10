@@ -215,9 +215,9 @@ class ImportIFC:
     def getOriginShift(self, site):
         def mergeDegrees(Degrees):
             if len(Degrees) == 4:
-                degree = Degrees[0]+Degrees[1]/60.0+(Degrees[2]+Degrees[3]/1000000.0)/3600.0
+                degree = Degrees[0] + Degrees[1]/60.0 + (Degrees[2] + Degrees[3]/1000000.0)/3600.0
             elif len(Degrees) == 3:
-                degree = Degrees[0]+Degrees[1]/60.0+Degrees[2]/3600.0
+                degree = Degrees[0]+Degrees[1]/60.0 + Degrees[2]/3600.0
             else:
                 print("Wrong input of degrees")
             return degree
@@ -226,13 +226,18 @@ class ImportIFC:
 
         source = osr.SpatialReference()
         source.ImportFromEPSG(4326)
+        # Berechnung des EPSG-Codes des Zielkoordinatensystems
+        # Die WGS84-Grenzen für die UTM-Zone 32N (EPSG-Code 32632) liegen
+        # zwischen 6° und 12°
+        # Die WGS84-Grenzen für die UTM-Zone 33N (EPSG-Code 32633) liegen 
+        # zwischen 12° und 18°
+        if 18 > b >= 12:
+            EPSG = 32633
+        elif 6 <= b < 12:
+            EPSG = 32632
         target = osr.SpatialReference()
-        target.ImportFromEPSG(32632)
+        target.ImportFromEPSG(EPSG)
         transform = osr.CoordinateTransformation(source, target)
-        #geom.Transform(transform)
-        #crs = pyproj.CRS.from_epsg(32632)
-        #proj = pyproj.Transformer.from_crs(4326,crs)
-        #a, b = proj.transform(a,b)
         x, y, z = transform.TransformPoint(a, b)
         c = site.RefElevation
         return [x, y, c]
@@ -240,9 +245,48 @@ class ImportIFC:
     def georeferencingPoint(self, transMatrix, originShift, inX, inY):
         a = [inX, inY, 0]
         result = np.mat(a)*np.mat(transMatrix)+np.mat(originShift)
-        #print(result)
         return result
+    
+    def getBuildingFootprint(self, ifc_file, IfcBuilding, IfcSite, IfcProject):
+        grouped_verts = []
         
+        originShift = self.getOriginShift(IfcSite)
+        trans = self.getTransformMatrix(IfcProject)
+
+        if IfcBuilding.Representation != None:
+            settings = geom.settings()
+            # Gibt an, ob Subtypen von IfcCurve einbezogen werden sollen.
+            settings.set(settings.INCLUDE_CURVES, True)
+            settings.set(settings.USE_WORLD_COORDS, True)
+            shape = geom.create_shape(settings, IfcBuilding)
+            ios_vertices = shape.geometry.verts
+
+            for i in range(0, len(ios_vertices), 3):
+                result = self.georeferencingPoint(trans, originShift, ios_vertices[i], ios_vertices[i + 1])
+                array = np.array(result)
+                grouped_verts.append((array[0][0], array[0][1]))
+
+        else:
+            for ifc_entity in ifc_file.by_type("IfcBuildingElementProxyType"):
+                try:
+                    footprint = ifcopenshell.util.element.get_psets(ifc_entity)["Pset_BuildingElementProxyCommon"]["Reference"]
+                    if footprint == "BuildingFootprint":
+                        geometry = ifc_entity.RepresentationMaps[0].MappedRepresentation.Items[0]
+                        t = geometry.SweptArea.OuterCurve.Points.CoordList
+                except:
+                    continue
+                    
+            for i in range(0, len(t) - 1):
+                result = self.georeferencingPoint(trans, originShift, t[i][0], t[i][1])
+                array = np.array(result)
+                grouped_verts.append((array[0][0], array[0][1]))
+
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        for point in grouped_verts:
+            ring.AddPoint(point[0], point[1])
+
+        return ring
+    
     def run(self):
         """Run method that performs all the real work"""
 
@@ -258,151 +302,135 @@ class ImportIFC:
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            print("Path at terminal when executing this file")
-            print(os.getcwd() + "\n")
 
-            print("This file path, relative to os.getcwd()")
-            print(__file__ + "\n")
-
-            print("This file full path (following symlinks)")
-            full_path = os.path.realpath(__file__)
-            print(full_path + "\n")
-
-            print("This file directory and name")
-            path, filename = os.path.split(full_path)
-            print(path + ' --> ' + filename + "\n")
-
-            print("This file directory only")
-            print(os.path.dirname(full_path))
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
+            
             folder_path = self.dlg.localsave.filePath()
+            save_path = self.dlg.localsave_2.filePath()
             ifc_file = ifcopenshell.open(folder_path)
-            print(ifc_file.schema)
             
-            
-            
-            
-
-            USE_WORLD_COORDS = 1 << 1
-            settings = geom.settings()
-            settings.set(settings.USE_WORLD_COORDS, True)
-            #####################################
-            # Um das Bezugssystem aus der IFC-Datei zu bekommen
-            #IfcProjectedCRS = ifc_file.by_type("IfcProjectedCRS")[0]
-
-            #EPSGName = IfcProjectedCRS.Name
-            #EPSGCode = int(EPSGName[5:])
-            #print("EPSG-Code: " , EPSGCode)
-            #EPSGCode = 32632
+            # Ausgabe der IFC-Version
+            if ifc_file.schema != "IFC4":
+                print("Falsche IFC-Version. Nur IFC4 erlaubt!")
+                sys.exit(0)
             
             #########################
-            IfcSlab = ifc_file.by_type("IfcSlab")[0]
-            IfcSite = ifc_file.by_type("IfcSite")[0]
+            
             IfcProject = ifc_file.by_type("IfcProject")[0]
-            
-            shape = geom.create_shape(settings, IfcSlab)
-            ios_vertices = shape.geometry.verts
-            
-            trans = self.getTransformMatrix(IfcProject)
-            originShift = self.getOriginShift(IfcSite) 
-            
-            grouped_verts = []
-            for i in range(0, len(ios_vertices), 3):
-              if ios_vertices[i + 2] == ios_vertices[2]:
-                result = self.georeferencingPoint(trans, originShift, ios_vertices[i], ios_vertices[i + 1])
-                array = np.array(result)
-                grouped_verts.append((array[0][0], array[0][1]))
+            IfcSite = ifc_file.by_type("IfcSite")[0]
+            IfcBuilding = ifc_file.by_type("IfcBuilding")[0]
+
+            buildingFootprint = self.getBuildingFootprint(ifc_file, IfcBuilding, IfcSite, IfcProject)
+            print(buildingFootprint)
+                            
             ################################
+            # Extrahierung des Baujahrs, Konstruktionstyps, Gebäudenamen
 
-            # Extrahierung des Typ der Konstruktion
-
+            Year_of_construction = ifcopenshell.util.element.get_psets(IfcBuilding)["Pset_BuildingCommon"]["YearOfConstruction"]
+            OccupancyType = ifcopenshell.util.element.get_psets(IfcBuilding)["Pset_BuildingCommon"]["OccupancyType"]
+            BuildingName = IfcBuilding.LongName
             
+            print("Year_of_construction: ", Year_of_construction)
+            print("OccupancyType: ", OccupancyType)
+            #print(BuildingHeight)
+            print("BuildingName: ", BuildingName)
+            Year_of_construction = int(Year_of_construction)
+            
+            # Berechnung des Standards
+            BuildingStandard =""
+            
+            if 1000 < Year_of_construction <= 1920:
+                BuildingStandard = "STANDARD1"
+            elif 1921 <= Year_of_construction <= 1970:
+                BuildingStandard = "STANDARD2"
+            elif 1971 <= Year_of_construction <= 1980:
+                BuildingStandard = "STANDARD3"
+            elif 1981 <= Year_of_construction <= 2000:
+                BuildingStandard = "STANDARD4"
+            elif 2001 <= Year_of_construction <= 2040:
+                BuildingStandard = "STANDARD5"
+            else:
+                BuildingStandard = "k. A."
 
-            Type_of_construction = ifcopenshell.util.element.get_psets(IfcProject)["Pset_ProjectCommon"]["ConstructionMode"]
-            #Type_of_construction = Massivhaus
-            print("Typ der Konstruktion", Type_of_construction)
+            print("BuildingStandard: ", BuildingStandard)
+
+            ######################
+            
+            # Rauminformationen extrahieren
+            
+            try:
+                gesamtFlaeche = 0
+
+                IfcSpace = ifc_file.by_type("IfcSpace")[0]
+                for ifc_entity in ifc_file.by_type("IfcSpace"):
+                    nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["NetFloorArea"]
+                    #nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["Gemessene Nettofläche"]
+                    gesamtFlaeche += nutzung_in_m2
+
+                for ifc_entity in ifc_file.by_type("IfcSpace"):
+
+                    raumName = ifc_entity.LongName
+                    nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["NetFloorArea"]
+                    print(raumName, nutzung_in_m2 , " m2,", " Nutzungsverteilung im Gebäude: ", (nutzung_in_m2/gesamtFlaeche)*100)
+
+            except:
+                print("Keine Raunminformationen vorhanden!")
+                
             
             ################################
 
             building_height = 0
+            floors_ag = 0
+            floors_bg = 0
+            height_ag = 0
+            height_bg = 0
 
             # Extrahierung des Typ der Konstruktion
             for ifc_entity in ifc_file.by_type("IfcBuildingStorey"):
-
-              storey_height = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["NetHeight"]
-              building_height += storey_height
-              
-            building_height = int(round(building_height,0))
-            ################################
-
-            # Extrahierung des Baujahrs
-
-            IfcBuilding = ifc_file.by_type("IfcBuilding")[0]
-
-            Year_of_construction = ifcopenshell.util.element.get_psets(IfcBuilding)["Pset_BuildingCommon"]["YearOfConstruction"]
-            NumberOfStoreys = ifcopenshell.util.element.get_psets(IfcBuilding)["Pset_BuildingCommon"]["NumberOfStoreys"]
-            BuildingName = IfcBuilding.Name
-            BuildingUseType = IfcBuilding.ObjectType
+                above = ifcopenshell.util.element.get_psets(ifc_entity)["Pset_BuildingStoreyCommon"]["AboveGround"]
+                storey_height = ifcopenshell.util.element.get_psets(ifc_entity)["Qto_BuildingStoreyBaseQuantities"]["GrossHeight"]
+                #storey_height = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["GrossHeight"]
+                if above == True:
+                    floors_ag += 1
+                    height_ag += storey_height
+                elif above == False:
+                    floors_bg += 1
+                    height_bg += storey_height
+                building_height += storey_height
             
-            print("Gebäudename: ", BuildingName)
-            print("Baujahr: " , Year_of_construction)
+            # Runden der Höhen
+            height_ag = int(round(height_ag,0))
+            height_bg = int(round(height_bg,0))
+            
+            print("floors_ag: ", floors_ag)
+            print("floors_bg: ", floors_bg)
+            print("height_ag: ", height_ag)
+            print("height_bg: ", height_bg)
 
-            ################################
-
-            # U-Werte extrahieren:
-            # for elements in IfcElement:
-              # if isexternal == True...
-            # Für Fenster:
-            for ifc_entity in ifc_file.by_type("IfcWall"):
-
-              UWert = ifcopenshell.util.element.get_psets(ifc_entity)["Pset_WallCommon"]["ThermalTransmittance"]
-              #wwr = ifcopenshell.util.element.get_psets(ifc_entity)["ArchiCADQuantities"]["Analytische Oberfläche der Öffnungen an der Außenseite"]
-
-              print("U-Werte: " , UWert)
-              #print("Window-Wall-Ratio: " , wwr)
-
-            # Für Bodenplatten (IfcSlab)
-            # Für Dächer (IfcRoof)
-            # Für Fenster (IfcWindow)
-
-            ################################
-
-            # Extrahierung der Nutzungsverteilung
-            gesamtFlaeche = 0
-            for ifc_entity in ifc_file.by_type("IfcSpace"):
-              nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["NetFloorArea"]
-              gesamtFlaeche += nutzung_in_m2
-
-            for ifc_entity in ifc_file.by_type("IfcSpace"):
-
-              raumName = ifc_entity.LongName
-              #nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["Gemessene Nettofläche"]
-              nutzung_in_m2 = ifcopenshell.util.element.get_psets(ifc_entity)["BaseQuantities"]["NetFloorArea"]
-              print(raumName, nutzung_in_m2 , " m2,", " Prozentuale Nutzungsverteilung im Gebäude: ", (nutzung_in_m2/gesamtFlaeche)*100)
-
-            ################################
-
-            # Fensterflächenanteile der einzelnen Fassaden (WWR Window-wall-ratio)
-
-            # Möglichkeit direkt aus Fenster mit ArchiCADQuantities und 
-            # dem Wert "Analytische Oberfläche der Öffnungen an der Außenseite" 
-            # oder berechnen auf Basis der Größe der Fenster und Wände
-            # Dabei wird nicht das Dach berücksichtigt
+            building_height = int(round(building_height,0))
 
             ################################
             
             driver = ogr.GetDriverByName("ESRI Shapefile")
             try:
-                data_source = driver.CreateDataSource(r"C:\Users\Marco\OneDrive\Masterarbeit\Dateien\ifcopenshell\shapefiles\zone.shp")
+                data_source = driver.CreateDataSource(save_path + "\\zone.shp")
 
-                # create the spatial reference, WGS84
-                EPSGCode = 32632
+                # Berechnung des EPSG-Codes des Zielkoordinatensystems
+                # Die WGS84-Grenzen für die UTM-Zone 32N (EPSG-Code 32632) liegen
+                # zwischen 6° und 12°
+                # Die WGS84-Grenzen für die UTM-Zone 33N (EPSG-Code 32633) liegen 
+                # zwischen 12° und 18°
+
+                lon = IfcSite.RefLongitude[0]
+                if 18 > lon >= 12:
+                    EPSG = 32633
+                elif 6 <= lon < 12:
+                    EPSG = 32632
                 srs = osr.SpatialReference()
-                srs.ImportFromEPSG(EPSGCode)
+                srs.ImportFromEPSG(EPSG)
 
                 # create the layer
-                #layer = data_source.CreateLayer("volcanoes", srs, ogr.wkbPoint)
                 layer = data_source.CreateLayer("IfcBuilding", srs, ogr.wkbPolygon)
                 
                 # Add the fields we're interested in
@@ -429,33 +457,19 @@ class ImportIFC:
             ################################
             
             try:
-                # Grundstück als Polygon in ein Shape-File speichern
-                wkt = "POLYGON(("
+                poly = ogr.Geometry(ogr.wkbPolygon)
+                poly.AddGeometry(buildingFootprint)
 
-                for coord in grouped_verts:
-                 
-                  # Als Polygon im Format:
-                  # POLYGON ((30 10, 40 40, 20 40, 10 20, 30 10))
-                  
-                  # create the WKT for the feature using Python string formatting
-                  wkt += str(float(coord[0])) + " "
-                  wkt += str(float(coord[1]))
-                  if coord == grouped_verts[-1]:
-                    wkt += "))"
-                  else:
-                    wkt += ","
-
-                # Create the point from the Well Known Txt
-                polygon = ogr.CreateGeometryFromWkt(wkt)
-                
                 feature = ogr.Feature(layer.GetLayerDefn())
-                # Set the feature geometry using the polygon
-                feature.SetGeometry(polygon)
+
+                # Set the feature geometry using the point
+                feature.SetGeometry(poly)
                 feature.SetField('Name', BuildingName)
-                feature.SetField('floors_ag', NumberOfStoreys)
-                feature.SetField('floors_bg',"0")
-                feature.SetField('height_ag', building_height)
-                feature.SetField('height_bg',"0")
+                feature.SetField('floors_ag', floors_ag)
+                feature.SetField('floors_bg', floors_bg)
+                feature.SetField('height_ag', height_ag)
+                feature.SetField('height_bg', height_bg)
+
                 # Create the feature in the layer (shapefile)
                 layer.CreateFeature(feature)
                 # Dereference the feature
@@ -467,31 +481,47 @@ class ImportIFC:
                 # Layer dem QGIS-Projekt hinzufügen
                 project = QgsProject.instance()
             
-                vlayer = QgsVectorLayer(r"C:\Users\Marco\OneDrive\Masterarbeit\Dateien\ifcopenshell\shapefiles\zone.shp","zone",'ogr')
-                vlayer.setCrs(QgsCoordinateReferenceSystem(EPSGCode))
+                vlayer = QgsVectorLayer(save_path +"\\zone.shp","zone",'ogr')
+                vlayer.setCrs(QgsCoordinateReferenceSystem(EPSG))
                 QgsProject.instance().addMapLayer(vlayer)
             except:
                 iface.messageBar().pushMessage("Error","Die Aktion kann nicht abgeschlossen werden, da die Datei noch geöffnet ist.", level=Qgis.Critical)
             
-            # Typology-Datei anpassen
+            # Typology-Datei erzeugen
             try:
-                file = r"C:\Users\Marco\OneDrive\Masterarbeit\Dateien\ifcopenshell\shapefiles\typology.dbf"
-                tb = dbf.Table(file)
-                print(tb)
-                titles = dbf.get_fields(file)
+                spalten =   ("NAME C(25)", 
+                            "STANDARD C(25)",
+                            "YEAR N(20,0)",
+                            "1ST_USE C(25)",
+                            "1ST_USE_R N(20,0)",
+                            "2ND_USE C(25)",
+                            "2ND_USE_R N(20,0)",
+                            "3RD_USE C(25)",
+                            "3RD_USE_R N(20,0)",
+                            "REFERENCE N(36,15)"
+                            )
 
-                for rec in dbf.Process(tb):
-                  rec["NAME"] = BuildingName
-                  rec["STANDARD"] = "STANDARD1"
-                  rec["YEAR"] = Year_of_construction
-                  rec["1ST_USE"] = BuildingUseType
-                  rec["1ST_USE_R"] = 1
-                  rec["2ND_USE"] = "NONE"
-                  rec["2ND_USE_R"] = 0
-                  rec["3RD_USE"] = "NONE"
-                  rec["3RD_USE_R"] = 0
+                table = dbf.Table(
+                    filename=save_path + "\\typology.dbf",
+                    field_specs=spalten,
+                    on_disk=True
+                    )
+                
+                table.open(dbf.READ_WRITE)
+                table.append((BuildingName, 
+                            BuildingStandard, 
+                            Year_of_construction,
+                            OccupancyType,
+                            1,
+                            "NONE",
+                            0,
+                            "NONE",
+                            0))
 
-                tb.close()
+                for record in table:
+                    print(record)
+                    
+                table.close()
             except:
                 iface.messageBar().pushMessage("Error","Die Erzeugung der typology.dbf hat nicht geklappt!", level=Qgis.Critical)
 
