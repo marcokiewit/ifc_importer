@@ -4562,7 +4562,7 @@ def add_numeric(format, flags):
     flag = 0
     for f in format[1:]:
         flag |= FieldFlag.lookup(f)
-    if not 0 < length < 20:
+    if not 0 < length < 100:
         raise FieldSpecError("Numeric fields must be between 1 and 19 digits, not %d" % length)
     if decimals and not 0 < decimals <= length - 2:
         raise FieldSpecError("Decimals must be between 0 and Length-2 (Length: %d, Decimals: %d)" % (length, decimals))
